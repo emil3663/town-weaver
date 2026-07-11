@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Town Weaver — AI town map prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=EB+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <div class="eyebrow">Town Weaver — prototype</div>
+    <h1 id="townName">Thornwick</h1>
+    <div class="subtitle" id="townSubtitle">Town of the Library of Journeys</div>
+  </header>
+  <div class="divider"></div>
+
+  <div class="generator">
+    <label for="promptInput">Describe a town concept, and Claude will design and draw a new one</label>
+    <textarea id="promptInput" rows="2" placeholder="e.g. a coastal smugglers' town built into sea caves, run by a council of retired pirates"></textarea>
+    <div class="gen-actions">
+      <button id="generateBtn" type="button">Generate town</button>
+      <button id="resetBtn" type="button">Reset to Thornwick</button>
+    </div>
+    <div class="gen-status" id="genStatus"></div>
+  </div>
+
+  <section class="map-section">
+    <div class="map-wrap">
+      <svg id="map" viewBox="0 0 680 720" role="img" aria-label="Interactive town map"></svg>
+      <div class="legend">
+        <span><span class="swatch" style="background:var(--magic)"></span> Inner ring</span>
+        <span><span class="swatch" style="background:var(--coral)"></span> Outer ring</span>
+        <span><span class="swatch" style="background:var(--forest)"></span> Border</span>
+        <span><span class="swatch" style="background:var(--river)"></span> River</span>
+      </div>
+    </div>
+    <div class="info-panel" id="infoPanel">
+      <h3 id="infoName">Explore the map</h3>
+      <p id="infoDesc" class="info-hint">Click any building, the river, or the border to read about it.</p>
+    </div>
+  </section>
+
+  <section class="doc-sections">
+    <h2>The full record</h2>
+
+    <details open>
+      <summary>Overview</summary>
+      <div class="doc-body" id="overviewBody"></div>
+    </details>
+
+    <details open>
+      <summary id="landmarkSummary">The landmark</summary>
+      <div class="doc-body" id="landmarkBody"></div>
+    </details>
+
+    <details>
+      <summary>Notable residents</summary>
+      <div class="doc-body" id="residentsBody"></div>
+    </details>
+
+    <details>
+      <summary>Economy, customs and traditions</summary>
+      <div class="doc-body" id="economyBody"></div>
+    </details>
+
+    <details>
+      <summary>Plot hooks and dangers</summary>
+      <div class="doc-body" id="hooksBody"></div>
+    </details>
+  </section>
+
+  <footer id="footerQuote"></footer>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
