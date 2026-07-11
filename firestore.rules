@@ -1,0 +1,22 @@
+rules_version = '2';
+
+// Town Weaver Firestore security rules.
+//
+// Two collections exist in v1:
+//  - townSyncs/{userId}: the future per-user sync target (TW-203). Built and
+//    rule-tested now even though unreachable until sign-in ships — owner-only.
+//  - rateLimits/{document=**}: the server-side generation counter (TW-202).
+//    Written exclusively by the backend via the Admin SDK, which bypasses
+//    these rules entirely — so client access is denied outright.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /townSyncs/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    match /rateLimits/{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
