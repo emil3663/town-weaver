@@ -229,6 +229,10 @@ const resetBtn = document.getElementById('resetBtn');
 const promptInput = document.getElementById('promptInput');
 const genStatus = document.getElementById('genStatus');
 
+// Backend base URL. Updated to the deployed Render URL once TW-104 stands
+// up the live service; defaults to a local backend for development.
+const API_BASE_URL = "http://localhost:8000";
+
 function setStatus(msg, isError){
   genStatus.textContent = msg;
   genStatus.style.color = isError ? 'var(--coral)' : 'var(--ink-soft)';
@@ -237,31 +241,17 @@ function setStatus(msg, isError){
 async function generateTown(promptText){
   setStatus('Drafting the town charter…', false);
   generateBtn.disabled = true;
-  const system = `You design fictional settlements for a tabletop RPG map app. Given a short concept, output ONLY one JSON object, no prose, no markdown fences, matching exactly this shape:
-{"name":string,"subtitle":string,"overview":string (2-3 sentences),
-"landmark":{"name":string,"description":string (1-2 sentences)},
-"riverName":string or null,"riverDesc":string or null (1 sentence),
-"forestDesc":string or null (1 sentence, describes whatever borders the settlement — forest, dunes, ice, etc.),
-"locations":[6 to 10 objects: {"name":string,"ring":"inner" or "outer","category": one of "dwelling","water","nature","defense","agriculture","burial","gate","dock","ritual","description":string (under 18 words)}],
-"residents":[3 to 4 objects: {"name":string,"role":string,"bio":string (under 15 words)}],
-"economy":string (1 sentence),"customs":[3 short strings],"hooks":[3 short strings],"dangers":string (1 sentence),"quote":string (a short inscription-style line)}
-Pick categories that genuinely match each location's function. Keep every string terse. Split locations roughly evenly between "inner" and "outer" rings.`;
-
   try{
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    const response = await fetch(`${API_BASE_URL}/api/generate-town`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1000,
-        system: system,
-        messages: [{ role: "user", content: promptText }]
-      })
+      body: JSON.stringify({ concept: promptText })
     });
-    const json = await response.json();
-    const text = (json.content || []).map(c => c.text || '').join('');
-    const cleaned = text.replace(/```json|```/g, '').trim();
-    const data = JSON.parse(cleaned);
+    if(!response.ok){
+      const errBody = await response.json().catch(()=>({}));
+      throw new Error(errBody.detail || `Request failed (${response.status})`);
+    }
+    const data = await response.json();
     if(!data.landmark) data.landmark = {name:"The landmark", description:""};
     renderMap(data);
     renderDoc(data);
