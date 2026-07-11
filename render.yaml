@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: town-weaver-api
+    runtime: python
+    plan: free
+    rootDir: server
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: FIRESTORE_ADMIN_CREDENTIALS_JSON
+        sync: false
