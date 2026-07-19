@@ -1,131 +1,90 @@
-# Town Weaver — Architecture Document (Phase 0: Foundation)
+# Town Weaver — Architecture Document (v1: Ollama-based, zero cost)
 
 Date: 2026-07-10
-Scope: Establish the technical foundation for an AI-assisted interactive town-map generator, evolved from the Thornwick prototype.
-Status: Approved and locked. All decisions below are confirmed; see `QUESTIONS.md` for the resolved decision log.
+Scope: Ship Town Weaver as a personal/friend-accessible app using local open-source models via Ollama. No running costs, no API keys, no backend infrastructure.
+Status: Approved and locked.
 
 ## 1. Problem and goals
 
-The prototype proved the core idea: a text concept goes in, a structured interactive town map comes out, rendered as clickable vector icons on a fixed hex-and-road layout. This phase turns that prototype into a real, shippable app.
+The prototype proved the core idea: a text concept goes in, a structured interactive settlement map comes out, rendered as clickable vector icons on a fixed hex-and-road layout. This phase turns that prototype into a real, deployable app that works entirely locally or with a friend's shared Ollama instance — zero running costs.
 
 Goals for this phase:
 - Define the system's components and how they talk to each other.
-- Define the data model for a generated town, so client, backend, and storage agree on shape.
-- Resolve the structural problem the prototype sidesteps: the Anthropic API key.
-- Produce a repository structure so implementation can start immediately.
+- Use Ollama + open-source models (Mistral, Llama) instead of Claude API — no API costs.
+- Allow users to run locally by default, with optional configuration for a shared Ollama instance.
+- Ship on GitHub Pages (free, static hosting).
+- Produce a detailed setup guide so users can get started in minutes.
 
 ## 2. Non-goals (v1)
 
-- Painted/textured map art (an Inkarnate-style look). The map stays vector-illustrated SVG, matching the prototype. Chosen as a future direction — see Section 10.
-- Hand-drawn map digitization (photo/scan → digital map). Future direction — see Section 10.
-- Zoom and pan on the map. Fixed view, matching the prototype. Deferred to a later phase.
-- Sign-in and cross-device sync UI. Firestore is wired up in v1 (Section 4.3), but the sign-in flow itself is a fast-follow, not v1.
-- Multiplayer or shared/collaborative editing of a single town.
-- Native mobile wrap (Capacitor). Web-first; wrapping is a later phase, same pattern as the other repos.
-- Monetization or billing for generations.
+- Backend infrastructure (Render, FastAPI, proxies, rate limiting). All computation is local or user-configured.
+- Paid tier / freemium billing. That's a future direction once costs aren't a blocker.
+- Sign-in, cloud sync, or persistent storage beyond localStorage.
+- Painted/textured map art. Vector-illustrated, like the prototype.
+- Zoom and pan on the map.
+- Native mobile wrap (Capacitor).
 
 ## 3. System architecture
 
-The prototype has two components (browser, Anthropic API). The real app needs three — a backend sits between them:
+Simple: client calls Ollama directly (local, or at a user-specified URL):
 
 ```
-┌────────────┐   generate/edit request   ┌───────────────┐   Messages API   ┌────────────┐
-│   Client    │ ─────────────────────────▶│ Backend proxy │─────────────────▶│ Claude API │
-│ (browser)   │◀───────────────────────── │ (FastAPI)     │◀───────────────── │ (Sonnet)   │
-└────────────┘     town/location JSON     └───────────────┘   generated JSON  └────────────┘
-      │                                          │
-      │ localStorage                             │ generation counter (rate limit)
-      ▼                                          ▼
-┌────────────┐                            ┌───────────────┐
-│  Browser    │                           │  Firestore     │
-│  (always on)│                           │ (server-side)  │
-└────────────┘                            └───────────────┘
+┌────────────┐   generate/edit request (HTTP)   ┌──────────────┐
+│   Client    │ ────────────────────────────────▶│   Ollama      │
+│ (browser)   │◀─────────────────────────────────│  (local or    │
+└────────────┘     settlement/location JSON      │   remote)     │
+      │                                          └──────────────┘
+      │ localStorage
+      ▼
+┌────────────┐
+│  Browser    │
+│  (always on)│
+└────────────┘
 ```
 
-- The client never talks to Claude directly. It only ever calls its own backend.
-- The backend is the only component that holds the Anthropic API key.
-- Saved towns live in `localStorage` first — this works for every user immediately, no account required.
-- Firestore serves two purposes in v1: (a) a server-side generation counter for rate limiting, written directly by the backend using admin credentials, independent of any user account; (b) the future per-user sync target, fully wired and tested now, but not reachable by end users until sign-in ships in a later phase.
+- Client calls Ollama at `http://localhost:11434` by default (if Ollama is running locally).
+- Client includes a settings panel to point at a different Ollama URL (e.g., a friend's shared instance).
+- No credentials, no API keys, no backend.
+- Settlement data is saved to `localStorage` immediately; survives browser refresh.
 
 ## 4. Components
 
 ### 4.1 Client
-- Vanilla JS with inline SVG, directly descended from the prototype's rendering engine (`renderMap`, `renderDoc`, the icon functions). This code does not need to change to move from prototype to real app.
-- Calls the backend instead of `api.anthropic.com` directly, for both full-town generation and single-location regeneration.
-- Local-first: a generated town lives in `localStorage` the moment it's created, and reloads on return visits. No account is required to use the app at all.
+- Vanilla JS with inline SVG, directly descended from the prototype.
+- Calls `POST http://localhost:11434/api/generate` (or user-configured URL) instead of Anthropic.
+- Includes settings panel where users can:
+  - Change Ollama URL (defaults to `localhost:11434`)
+  - Change model name (defaults to `mistral` or `llama2`)
+  - See connection status and error messages
+- Saves settlements to `localStorage` with versioned schema.
 
-### 4.2 Backend (new — doesn't exist in the prototype)
-- **Framework: Python / FastAPI.** Chosen over Node (despite the other repos being JS) specifically because two confirmed future directions — painted-map generation and hand-drawn-map digitization — are computer-vision-heavy work (OpenCV, Pillow, and the broader ML/CV ecosystem are overwhelmingly Python-first). Starting in Python now avoids a language split or rewrite when that work begins.
-- **Hosting: Render.com**, free tier, no card required. Tradeoff: the service sleeps after ~15 minutes idle, adding a 30-60s cold start to the first request after a lull. Acceptable for the current traffic level; revisit if it becomes annoying.
-- Two responsibilities:
-  1. `POST /api/generate-town` — accept a concept string, call Claude with the system prompt and schema, validate and return the resulting `Town` JSON.
-  2. `POST /api/regenerate-location` — accept the current town context plus a target location, call Claude for a replacement of just that one location, validate and return it.
-- Holds the Anthropic API key as a server-side environment variable — never shipped to the client, never committed.
-- Validates the shape of Claude's response before returning it. The prototype trusts `JSON.parse` blindly — this backend does not.
-- Holds Firestore admin credentials and increments the generation counter on every successful call to either endpoint, checking the daily cap before calling Claude.
+### 4.2 Ollama
+- User installs Ollama locally (https://ollama.ai)
+- User runs `ollama pull mistral` (or `llama2`, etc.) — once, takes a few minutes
+- `ollama serve` runs in the background, listening on `http://localhost:11434`
+- No authentication, no setup beyond installation
 
-### 4.3 Persistence (Firestore + localStorage)
-- `localStorage` is the source of truth for every user, signed in or not — this is what makes "saving is in v1" true without needing sign-in to also be in v1.
-- Firestore is set up now for two things: the rate-limit counter (active immediately, no auth needed), and the per-user sync collection (built and security-rule-tested now, but the sign-in UI that would make it reachable ships later).
-- Firestore security rules restrict per-user documents to their authenticated owner — written and tested in this phase even though unreachable by real users until sign-in exists.
+### 4.3 Optional shared instance
+- If a friend wants to run a shared Ollama server:
+  - Run Ollama on their machine (or cheap VPS like Linode $5/mo)
+  - Configure Ollama to bind to `0.0.0.0:11434` instead of just localhost
+  - Share the URL with you (e.g., `http://friend-server:11434`)
+  - You paste that URL into Town Weaver's settings
+- Detailed instructions in `HELP.md`
 
 ## 5. Data model
 
-```ts
-type Settlement = {
-  tier: "town" | "city" | "county-seat" | "provincial-capital";  // new, drives scale and structure
-  name: string;
-  subtitle: string;
-  population: number;          // tier-determined, shown to user for context
-  overview: string;
-  landmark: { name: string; description: string };
-  riverName: string | null;
-  riverDesc: string | null;
-  forestDesc: string | null;
-  locations: Location[];       // 6–10 for towns/cities; more for larger settlements
-  residents: Resident[];       // 3–4 for towns; 6–8 for cities; scales with tier
-  economy: string;
-  customs: string[];           // 3 items
-  hooks: string[];             // 3 items
-  dangers: string;
-  quote: string;
-};
-
-type Location = {
-  id: string;                  // stable id, needed for single-location regeneration
-  name: string;
-  ring: "inner" | "outer";
-  category: "dwelling" | "water" | "nature" | "defense" | "agriculture" | "burial" | "gate" | "dock" | "ritual";
-  description: string;
-};
-
-type Resident = { name: string; role: string; bio: string };
-```
-
-**Settlement tiers and their characteristics:**
-- **Town** (~500–2,000 pop): A market town or regional hub. 6–10 locations, 3–4 residents, intimate economy and governance.
-- **City** (~3,000–8,000 pop): A regional capital or major trade center. 10–15 locations, 6–8 residents, complex economy, multiple administrative roles.
-- **County Seat** (~8,000–15,000 pop): An administrative capital for a county. 12–18 locations, 8–12 residents, established history, military/civic infrastructure.
-- **Provincial Capital** (~15,000–40,000 pop): A kingdom or region's major city. 15–25 locations, 12–20 residents, extensive infrastructure, multiple districts.
-
-Note: `Settlement` renamed from `Town` to reflect that it can now represent multiple settlement types. The hex-and-road map scales to accommodate tier (more locations, more complex layout suggestions).
+Same `Settlement` type as before (with `tier`, `locations`, `residents`, etc.). Unchanged from the other version.
 
 ## 6. API design
 
-`POST /api/generate-settlement`
-- Request: `{ "concept": string, "tier": "town" | "city" | "county-seat" | "provincial-capital" }`
-- Response (200): a `Settlement` object with the requested tier, population scaled appropriately, and locations/residents matched to tier
-- Response (429): `{ "error": "Daily generation limit reached" }` — rate limit hit
-- Response (4xx/5xx): `{ "error": string }`
+**Town Weaver calls Ollama's standard completion API:**
 
-`POST /api/regenerate-location`
-- Request: `{ "settlement": Settlement, "locationId": string }`
-- Response (200): a single updated `Location` object, same `id`, to be merged into the client's current settlement state
-- Response (429/4xx/5xx): same error shape as above
+`POST http://[ollama-url]/api/generate`
+- Request: `{ "model": "mistral", "prompt": "...", "stream": false }`
+- Response: `{ "response": "JSON-formatted settlement object" }`
 
-The backend owns the system prompts for both routes (server-side, not shipped in client JS). Prompts are tier-aware — the prompt for a provincial capital is fundamentally different from the prompt for a town, in scope, economy, and governance detail.
-
-Route renamed from `/api/generate-town` → `/api/generate-settlement` to reflect the broader scope.
+Ollama's API is simple — it takes a text prompt and returns generated text. Town Weaver constructs four tier-specific prompts (embedded in the client, not secret), and parses Ollama's text response as JSON.
 
 ## 7. Repository structure
 
@@ -134,52 +93,51 @@ town-weaver/
 ├── README.md
 ├── LICENSE                     (MIT)
 ├── ARCHITECTURE.md             (this document)
+├── HELP.md                     (detailed setup guide for local & shared Ollama)
 ├── QUESTIONS.md                (resolved decision log)
 ├── PROJECT_PLAN.md
 ├── IMPLEMENTATION_BACKLOG.md
-├── TEST_PLAN.md                (added alongside first implementation phase)
 ├── client/
 │   ├── index.html
-│   ├── app.js                  (renderMap / renderDoc / icons — from the prototype)
+│   ├── app.js                  (renderMap / renderDoc / Ollama integration)
 │   └── style.css
-├── server/
-│   ├── main.py                 (FastAPI app entry point)
-│   ├── routes/
-│   │   ├── generate_town.py
-│   │   └── regenerate_location.py
-│   ├── firestore_client.py     (admin SDK init, counter logic)
-│   ├── requirements.txt
-│   └── .env.example
-└── firebase-config.example.js  (client-side config, for the future sign-in phase)
+└── (no server/ folder — computation is entirely client-side or on user's Ollama)
 ```
 
-## 8. Security
+## 8. System prompts (client-side, tier-aware)
 
-- Anthropic API key: server-side environment variable only. Never in client code, never committed.
-- Firestore admin credentials: server-side only, same handling as the Anthropic key.
-- Rate limiting: Firestore-backed counter, checked server-side before every Claude call, on both endpoints.
-- Firestore security rules: per-user, owner-only read/write for the future sync collection — written and tested in this phase even though not yet reachable by end users.
+Four prompts, embedded in `client/app.js`, one per tier. Each includes explicit JSON formatting requirements:
 
-## 9. Deployment topology
+```
+"Output ONLY a valid JSON object, no markdown, no explanation. 
+Return exactly: { tier, name, subtitle, population, overview, landmark, 
+riverName, riverDesc, forestDesc, locations, residents, economy, customs, 
+hooks, dangers, quote }. Never add backticks or markdown."
+```
 
-- **Client:** GitHub Pages, served directly from `client/` in this repo. Zero additional cost or infrastructure, and the client is a static vanilla JS app with no build step, so nothing else is needed.
-- **Backend:** Render.com, as established in Section 4.2.
-- **CORS:** the backend must explicitly allow the GitHub Pages origin (`https://emil3663.github.io`) in its CORS configuration — not a wildcard. This was missed in the original TW-103/TW-104 scope and needs adding to the FastAPI app before Gate A is actually reachable from the deployed client, not just from `localhost`.
+Ollama tends to hallucinate extra text, so prompts are more explicit than Claude's would be.
 
-## 10. Repository settings
+## 9. Security and privacy
 
-- **Name:** `town-weaver` (placeholder — can be renamed later without affecting anything in this document)
-- **Visibility:** Public
-- **License:** MIT
+- No API keys, no credentials anywhere.
+- All data stays local (`localStorage`, or on the user's machine running Ollama).
+- If a friend runs a shared Ollama instance, the URL is unencrypted HTTP — this is fine for a personal setup (not for production), and friends must trust each other.
+- Ollama has no authentication layer by default — if running on a public IP, protect it via firewall or VPN.
+
+## 10. Deployment
+
+- **Client:** GitHub Pages, `client/` folder, zero cost.
+- **Generation:** User installs and runs Ollama locally. Zero cost. Instructions in `HELP.md`.
+- **Optional shared:** Friend's machine or cheap VPS (e.g., Linode $5/mo). User's choice.
 
 ## 11. Deferred to later phases
 
-- Sign-in and cross-device sync UI (Firestore plumbing is ready; this activates it).
-- Zoom and pan on the map.
-- Capacitor wrap for app-store distribution.
-- Painted-art rendering mode — confirmed future direction; this is why the backend is Python.
-- Hand-drawn map digitization (photo/scan → interactive digital map) — confirmed future direction, same reasoning.
-- Shareable or public town links.
+- Swap to Claude API (once costs aren't a concern, this is a drop-in replacement).
+- Rate limiting / monetization / freemium.
+- Cloud sync or persistent cross-device storage.
+- Painted-art rendering.
+- Native mobile wrap.
 
 ---
+See `HELP.md` for detailed setup instructions.
 See `QUESTIONS.md` for the resolved decision log behind this document.

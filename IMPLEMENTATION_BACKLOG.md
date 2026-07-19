@@ -1,6 +1,8 @@
-# Town Weaver Implementation Backlog
+# Town Weaver Implementation Backlog (Ollama-based, v1)
 
 Prefix: `TW-`
+
+This is a simplified backlog compared to the Anthropic API version — no backend, no Render, no Firestore. Everything is client-side.
 
 ## Phase 0 — Repository and environment foundation
 
@@ -9,97 +11,80 @@ Prefix: `TW-`
 - **Phase:** 0
 - **Priority:** P0
 - **Suggested labels:** `setup`, `infra`
-- **Problem it solves:** Nothing else can start until the repo exists with the agreed folder layout — client, server, and docs need a home before any code is written.
+- **Problem it solves:** Nothing else can start until the repo exists with the agreed folder layout.
 - **Scope:**
-  - Create `client/`, `server/`, and doc files per `ARCHITECTURE.md` Section 7.
-  - Add `LICENSE` (MIT), `README.md` with a short project description.
+  - Create `client/` folder and doc files per `ARCHITECTURE.md` Section 7.
+  - Add `LICENSE` (MIT), `README.md` with a short project description, `HELP.md` (already written).
   - Port the prototype's `index.html`/inline JS into `client/index.html` + `client/app.js` + `client/style.css`, split apart but behaviorally unchanged.
 - **Deliverables:**
   - Initialized public repo, `town-weaver`, with the agreed structure.
-  - Working prototype behavior reproduced in the new file layout (still calling Anthropic directly at this point — that changes in Phase 1).
+  - Working prototype behavior reproduced in the new file layout.
 - **Acceptance criteria:**
   - Repo is public on GitHub under MIT license.
   - Opening `client/index.html` locally reproduces the prototype's generate/reset/click behavior exactly.
 - **Dependencies:** None.
 
-### TW-002 - Stand up Firestore project and initial security rules
+### TW-002 - Enable GitHub Pages
 
 - **Phase:** 0
-- **Priority:** P1
-- **Suggested labels:** `infra`, `firestore`
-- **Problem it solves:** Both the rate-limit counter (Phase 2) and the future sync collection need a real Firestore project to exist first.
+- **Priority:** P0
+- **Suggested labels:** `setup`, `deployment`
+- **Problem it solves:** The app needs a URL where friends can access it.
 - **Scope:**
-  - Create the Firebase project.
-  - Add `firebase-config.example.js` with placeholder values (per the local-first-with-optional-sync pattern).
-  - Write security rules restricting per-user documents to their authenticated owner, even though nothing uses them yet.
+  - Go to repo Settings → Pages → Deploy from branch.
+  - Select `main` branch, folder `client/`.
 - **Deliverables:**
-  - Firestore project, reachable by both server (admin SDK) and future client (config-gated).
-  - `firestore.rules` file committed to the repo.
+  - GitHub Pages URL (e.g., `https://emil3663.github.io/town-weaver/`)
 - **Acceptance criteria:**
-  - Rules deny cross-user reads/writes when tested against two different simulated auth identities.
-  - `firebase-config.example.js` contains only placeholder values, never real credentials.
+  - The Pages URL is live and serves `client/index.html`.
 - **Dependencies:** TW-001.
 
-### TW-003 - Stand up Render.com deployment target
+## Phase 1 — Ollama integration and tier-aware generation
 
-- **Phase:** 0
-- **Priority:** P1
-- **Suggested labels:** `infra`, `deployment`
-- **Problem it solves:** The backend needs somewhere to actually run before Phase 1 can be tested end to end.
-- **Scope:**
-  - Create the Render.com service pointed at `server/`.
-  - Configure environment variables (placeholders at this stage): Anthropic API key, Firestore admin credentials.
-- **Deliverables:**
-  - A deployed (even if not yet functional) Render service with a stable URL.
-- **Acceptance criteria:**
-  - Hitting the Render URL returns a response (even a placeholder "not implemented" is fine at this stage).
-- **Dependencies:** TW-001.
-
-## Phase 1 — Backend proxy and core generation flow
-
-### TW-101 - Build FastAPI backend with /api/generate-settlement (tier-aware)
+### TW-101 - Add tier-aware Ollama prompts and model selection to client
 
 - **Phase:** 1
 - **Priority:** P0
-- **Suggested labels:** `backend`, `feature`
-- **Problem it solves:** This is the core structural fix versus the prototype — the client can no longer hold the Anthropic API key, so the backend needs to exist and do the actual Claude call. Additionally, settlement generation must be tier-aware: towns, cities, county seats, and provincial capitals have fundamentally different scales and structures.
+- **Suggested labels:** `client`, `feature`
+- **Problem it solves:** The client needs four tier-specific prompts (town, city, county seat, provincial capital) embedded in the code, ready to send to Ollama. These prompts must be explicit about JSON formatting since Ollama is less reliable than Claude at structured output.
 - **Scope:**
-  - Create four tier-specific system prompts (server-side): one for towns (~500–2,000 pop, 6–10 locations), one for cities (~3,000–8,000 pop, 10–15 locations), one for county seats (~8,000–15,000 pop, 12–18 locations), one for provincial capitals (~15,000–40,000 pop, 15–25 locations).
-  - Implement `POST /api/generate-settlement`, accepting `{ concept: string, tier: "town" | "city" | "county-seat" | "provincial-capital" }`.
-  - Route the request to the appropriate tier-specific prompt based on the tier parameter.
-  - Return a `Settlement` object with the tier, a population figure that scales to the tier, and locations/residents counts that match the tier.
-  - Read the Anthropic API key from environment, never from client input.
+  - Create four system prompts (one per tier), each with explicit JSON formatting requirements: "Output ONLY a valid JSON object, no markdown, no explanation. Never add backticks."
+  - Each prompt includes tier-specific flavor text and population/location ranges.
+  - Store prompts in `client/app.js` as a `TIER_PROMPTS` object.
 - **Deliverables:**
-  - Working FastAPI route that calls Claude with a tier-aware system prompt and returns `Settlement`-shaped JSON.
+  - Four tier-specific prompts, embedded in client code.
 - **Acceptance criteria:**
-  - Calling the route with a concept and tier=town returns a settlement with ~500–2,000 population and 6–10 locations.
-  - Calling the route with the same concept and tier=provincial-capital returns a settlement with ~15,000–40,000 population and 15–25 locations.
-  - The Anthropic API key does not appear anywhere in client-shipped code.
+  - Each prompt explicitly states JSON output requirements.
+  - Prompts for different tiers are visibly different (town prompt suggests 6–10 locations; provincial capital suggests 15–25).
 - **Dependencies:** TW-001.
 
-### TW-102 - Server-side response validation (tier-aware)
+### TW-102 - Add settings panel for Ollama URL and model configuration
 
 - **Phase:** 1
 - **Priority:** P0
-- **Suggested labels:** `backend`, `reliability`
-- **Problem it solves:** The prototype trusts `JSON.parse` blindly on Claude's output; a real backend needs to catch malformed responses before they reach the client. Additionally, tier-aware generation means validation must check that location and resident counts match the tier constraints.
+- **Suggested labels:** `client`, `feature`
+- **Problem it solves:** Users need to be able to point at a different Ollama instance (local default, or a friend's shared server) and change which model to use. A settings panel makes this discoverable and easy.
 - **Scope:**
-  - Validate the parsed JSON against the `Settlement` schema (required fields present, `tier` is a valid tier, `locations[].category` is one of the allowed values, population is in the expected range for the tier, location count is within tier bounds).
-  - Return a clear 5xx error with a message if validation fails, rather than forwarding malformed data.
+  - Add a ⚙ (settings) button in the client UI.
+  - Settings panel shows:
+    - Ollama URL field (defaults to `http://localhost:11434`)
+    - Model name field (defaults to `mistral`)
+    - "Test connection" button (makes a test request to Ollama, shows success/error)
+    - "Save settings" button (stores to localStorage)
+  - Settings persist across page refreshes.
 - **Deliverables:**
-  - A schema validation function used by `/api/generate-settlement` (and reused by `/api/regenerate-location` in Phase 3).
+  - Settings UI in `client/index.html` and `client/app.js`.
 - **Acceptance criteria:**
-  - A deliberately malformed mock Claude response is rejected with a clear error, not forwarded to the client.
-  - A response with the right schema but invalid tier (e.g., tier="unknown") is rejected.
-  - A town-tier response with 25 locations (when town tier expects 6–10) is flagged and rejected.
-- **Dependencies:** TW-101.
+  - User can open settings, change the Ollama URL, click "Test connection", and see whether Ollama responds.
+  - User can change the model name and it persists.
+- **Dependencies:** TW-001.
 
 ### TW-103 - Add settlement tier selector to the client UI
 
 - **Phase:** 1
 - **Priority:** P0
 - **Suggested labels:** `client`, `feature`
-- **Problem it solves:** Users need to specify what kind of settlement they're generating (town, city, county seat, or provincial capital) so the backend can scale the response appropriately. Without tier selection, generation defaults to one size.
+- **Problem it solves:** Users need to specify what kind of settlement they're generating (town, city, county seat, or provincial capital) so the appropriate prompt is used.
 - **Scope:**
   - Add a dropdown/radio selector to the generator UI before the "Generate settlement" button, with four options: Town, City, County Seat, Provincial Capital.
   - Include a brief description under each option (e.g., "Town (~500–2,000 inhabitants, market town or regional hub)").
@@ -111,165 +96,127 @@ Prefix: `TW-`
   - The selected tier is visible and changeable before hitting Generate.
 - **Dependencies:** TW-001.
 
-### TW-103b - Migrate client to call the backend's /api/generate-settlement
+### TW-104 - Connect client to Ollama with tier-aware generation
 
 - **Phase:** 1
 - **Priority:** P0
 - **Suggested labels:** `client`, `feature`
-- **Problem it solves:** The whole point of Phase 1 — the client stops holding/calling with an API key at all. The client must now send both the concept and the selected tier to the backend.
+- **Problem it solves:** The client must actually call Ollama with the tier-specific prompt and parse the settlement response.
 - **Scope:**
-  - Replace the prototype's direct `fetch("https://api.anthropic.com/...")` call with a call to the backend's `/api/generate-settlement`.
-  - Capture the selected tier from TW-103's selector and include it in the request: `{ concept, tier }`.
-  - Keep the existing `renderMap`/`renderDoc` pipeline unchanged — only the data source and request shape change.
+  - Replace any prototype Anthropic API calls with calls to Ollama at `http://[ollama-url]/api/generate`.
+  - Build request: `{ model: [model-name], prompt: [tier-prompt + concept], stream: false }`.
+  - Parse the response: extract JSON from Ollama's text output.
+  - Render the settlement using existing `renderMap` / `renderDoc` functions.
+  - Show errors if Ollama is unreachable or returns invalid JSON.
 - **Deliverables:**
-  - Updated `client/app.js` pointing at the backend's `/api/generate-settlement` with tier parameter.
+  - Updated `client/app.js` with Ollama HTTP call and response parsing.
 - **Acceptance criteria:**
-  - Selecting tier=town and generating produces a settlement with 6–10 locations and ~500–2,000 population.
-  - Selecting tier=provincial-capital and generating produces a settlement with 15–25 locations and ~15,000–40,000 population.
-- **Dependencies:** TW-101, TW-103.
+  - Entering a concept, selecting a tier, and clicking "Generate settlement" calls Ollama and renders a settlement.
+  - Tier=town produces ~6–10 locations; tier=provincial-capital produces ~15–25 locations.
+  - If Ollama is unreachable, the app shows a clear error message.
+- **Dependencies:** TW-101, TW-102, TW-103.
 
-### TW-104 - Deploy and connect end to end
+### TW-105 - Deploy to GitHub Pages and verify end-to-end
 
 - **Phase:** 1
 - **Priority:** P0
 - **Suggested labels:** `infra`, `deployment`
-- **Problem it solves:** Phase 1 isn't actually done until it works as a deployed app, not just locally.
+- **Problem it solves:** Phase 1 isn't done until the live deployed app works end-to-end (with a real local Ollama instance).
 - **Scope:**
-  - Deploy the finished backend to the Render service from TW-003.
-  - Point the deployed client at the live backend URL.
-  - Configure GitHub Pages to serve the client.
+  - Ensure `client/` folder is committed and pushed to `main`.
+  - GitHub Pages is already set up from TW-002.
 - **Deliverables:**
-  - A publicly reachable version of the app that generates settlements end to end, with tier selection working.
+  - Live app accessible at the GitHub Pages URL.
 - **Acceptance criteria:**
-  - Visiting the deployed client URL, selecting tier=town, and generating a settlement works without any local setup.
-  - Selecting tier=provincial-capital and generating produces a visibly larger settlement (more locations, more residents).
-  - Tier selection persists across browser refreshes (stored in localStorage via TW-201 when it ships).
-- **Dependencies:** TW-101, TW-102, TW-103b, TW-003.
+  - Visiting the Pages URL and generating a settlement works (assuming Ollama is running locally on the tester's machine).
+  - Different tiers produce visibly different settlements.
+- **Dependencies:** TW-002, TW-104.
 
-## Phase 2 — Persistence and rate limiting
+## Phase 2 — Persistence and location editing
 
 ### TW-201 - localStorage save/load with versioned schema
 
 - **Phase:** 2
 - **Priority:** P0
 - **Suggested labels:** `client`, `feature`, `data`
-- **Problem it solves:** Right now a generated town disappears the moment you regenerate or close the tab. This is the v1 saving mechanism, and it needs to work with no account.
+- **Problem it solves:** A generated settlement currently disappears if you refresh the page. Users should be able to come back to their settlements.
 - **Scope:**
-  - Save the current town to `localStorage` on generation and on edit.
-  - Load the last-saved town on page load, falling back to the Thornwick default if nothing is saved.
-  - Add a schema version field so future changes to the `Town` shape don't break existing saved data.
+  - Save the current settlement to `localStorage` on generation and on edit (TW-302).
+  - Load the last-saved settlement on page load, falling back to Thornwick default if nothing is saved.
+  - Add a schema version field so future changes to the `Settlement` shape don't break existing saved data.
+  - Add a "Save settlement" button so users can explicitly save (even though it auto-saves).
+  - Add a "Clear saved data" button for users who want to start fresh.
 - **Deliverables:**
   - Versioned `localStorage` read/write functions in `client/app.js`.
 - **Acceptance criteria:**
-  - Refreshing the page after generating a town restores that same town, not the Thornwick default.
-  - A deliberately old-shaped saved record still loads without crashing the app.
-- **Dependencies:** TW-103.
+  - Refreshing the page after generating a settlement restores that same settlement, not the default.
+  - A deliberately old-shaped saved record still loads without crashing.
+- **Dependencies:** TW-104.
 
-### TW-202 - Firestore-backed generation counter and rate limit
-
-- **Phase:** 2
-- **Priority:** P0
-- **Suggested labels:** `backend`, `firestore`, `reliability`
-- **Problem it solves:** Every generation call costs real money against the Anthropic account; this needs a cap before the app is meaningfully public.
-- **Scope:**
-  - Backend increments a Firestore counter document on every successful `/api/generate-town` and (later) `/api/regenerate-location` call, using admin credentials.
-  - Backend checks the counter against a daily cap before calling Claude, returning 429 if exceeded.
-- **Deliverables:**
-  - `firestore_client.py` counter logic, wired into both generation routes.
-- **Acceptance criteria:**
-  - Exceeding the daily cap in a test environment returns a 429 with a clear error message, and does not call Claude.
-- **Dependencies:** TW-002, TW-101.
-
-### TW-203 - Scaffold dormant Firestore sync collection and rules
+### TW-202 - Add "regenerate this location" action to the client
 
 - **Phase:** 2
-- **Priority:** P2
-- **Suggested labels:** `client`, `firestore`, `future-proofing`
-- **Problem it solves:** Sign-in is a fast-follow, not v1 — but wiring the sync layer now means it can be switched on later without revisiting the storage design.
-- **Scope:**
-  - Add the config-gated Firebase initialization pattern to the client (checks whether `firebase-config.js` has real values; sync UI stays hidden if not).
-  - Confirm the per-user security rules from TW-002 cover the actual document shape saved in TW-201.
-- **Deliverables:**
-  - Sync-capable but currently-inactive Firestore client code.
-- **Acceptance criteria:**
-  - With `firebase-config.js` left as placeholders, the app behaves identically to TW-201 — no errors, no visible sync UI.
-- **Dependencies:** TW-002, TW-201.
-
-## Phase 3 — Location editing
-
-### TW-301 - Build /api/regenerate-location endpoint
-
-- **Phase:** 3
-- **Priority:** P0
-- **Suggested labels:** `backend`, `feature`
-- **Problem it solves:** v1 scope explicitly includes editing, not just one-shot generation — this is the endpoint that makes that possible.
-- **Scope:**
-  - Add `Location.id` to the data model (client and server).
-  - Implement `POST /api/regenerate-location`, accepting the current town plus a target `locationId`, returning a single replacement `Location`.
-  - Reuse the TW-102 validation logic against the single-location shape.
-- **Deliverables:**
-  - Working endpoint, covered by the same rate-limit check as TW-202.
-- **Acceptance criteria:**
-  - Calling the endpoint with a valid town and locationId returns a differently-worded location with the same `id` and a valid `category`.
-- **Dependencies:** TW-102, TW-202.
-
-### TW-302 - Add "regenerate this location" action to the client
-
-- **Phase:** 3
 - **Priority:** P1
 - **Suggested labels:** `client`, `feature`
-- **Problem it solves:** The backend capability from TW-301 needs a way for a user to actually trigger it.
+- **Problem it solves:** Users should be able to regenerate a single location in place, not just generate a whole new settlement.
 - **Scope:**
-  - Add a button/action in the info panel (shown when a location is selected) to request regeneration of just that location.
-  - Show a loading/error state consistent with the existing `genStatus` pattern.
+  - When a location is selected, show a "Regenerate" button in the info panel.
+  - Clicking it sends the current settlement + target location to Ollama, asking for a replacement of just that location.
+  - Show a loading state while waiting for Ollama.
+  - Merge the response back into the current settlement and re-render.
 - **Deliverables:**
-  - Updated info panel UI in `client/app.js` / `client/index.html`.
+  - Updated info panel and Ollama integration in `client/app.js`.
 - **Acceptance criteria:**
-  - Clicking a location and choosing to regenerate it shows a loading state, then updates that location's icon/label/description without affecting any other location.
-- **Dependencies:** TW-301.
+  - Clicking a location and choosing "Regenerate" updates that location's description/name without affecting other locations.
+  - The regenerated location persists after a page refresh (via TW-201).
+- **Dependencies:** TW-201.
 
-### TW-303 - Merge regenerated location into saved town state
+## Phase 3 — Nice-to-haves (if time permits)
+
+### TW-301 - Export settlement as JSON or text
 
 - **Phase:** 3
-- **Priority:** P1
-- **Suggested labels:** `client`, `data`
-- **Problem it solves:** A regenerated location needs to persist, not just update the current render — otherwise refreshing the page loses the edit.
+- **Priority:** P2
+- **Suggested labels:** `client`, `feature`
+- **Problem it solves:** Users might want to save a settlement outside the app (for D&D campaigns, world-building documents, etc.).
 - **Scope:**
-  - Merge the returned `Location` into the current town object by matching `id`.
-  - Re-save the updated town to `localStorage` (via TW-201's save function).
-- **Deliverables:**
-  - Merge logic in `client/app.js`.
-- **Acceptance criteria:**
-  - After regenerating a location and refreshing the page, the regenerated version persists (not the original).
-- **Dependencies:** TW-302, TW-201.
+  - Add an "Export" button to the UI.
+  - User can download the settlement as `settlement.json` or `settlement.txt` (readable format).
+- **Dependencies:** TW-201.
+
+### TW-302 - Import a settlement from JSON
+
+- **Phase:** 3
+- **Priority:** P2
+- **Suggested labels:** `client`, `feature`
+- **Problem it solves:** Users who exported a settlement should be able to load it back in.
+- **Scope:**
+  - Add a "Load from file" button.
+  - User selects a previously exported `.json` file.
+  - Settlement is validated and loaded into the app.
+- **Dependencies:** TW-301, TW-201.
 
 ## Recommended Execution Order
 
 1. TW-001
 2. TW-002
-3. TW-003
-4. TW-101
-5. TW-102
-6. TW-103 (add tier selector UI)
-7. TW-103b (connect client to backend with tier parameter)
-8. TW-104
-9. TW-201
-10. TW-202
-11. TW-203
-12. TW-301
-13. TW-302
-14. TW-303
+3. TW-101
+4. TW-102
+5. TW-103
+6. TW-104
+7. TW-105 (Gate A checkpoint)
+8. TW-201
+9. TW-202 (Gate B checkpoint after this one)
+10. TW-301 (if time permits)
+11. TW-302 (if time permits)
 
 ## Suggested Milestone Gates
 
-### Gate A - Backend live with tier-aware generation (end of Phase 1)
-- Generating a settlement in the deployed client works end to end via the Render-hosted backend.
-- Tier selection is visible and functional; selecting different tiers produces visibly different settlements (varying location counts, population, and scope).
-- No client code contains or calls the Anthropic API key directly.
+### Gate A - Live on GitHub Pages with tier-aware generation (end of Phase 1)
+- Visiting the GitHub Pages URL generates settlements end-to-end.
+- Tier selection is visible and functional; different tiers produce different settlement scales.
+- Settings panel allows pointing at a different Ollama URL for testing shared instances.
 
-### Gate B - Persistence and safety (end of Phase 2)
-- A generated town survives a page refresh.
-- The daily generation cap is enforced and tested.
-
-### Gate C - Editing (end of Phase 3)
-- A single location can be regenerated without disturbing the rest of the town, and the edit survives a refresh.
+### Gate B - Persistence and location editing (end of Phase 2)
+- Generated settlements persist across page refreshes.
+- Users can regenerate a single location in place without regenerating the entire settlement.
