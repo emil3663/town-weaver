@@ -26,7 +26,28 @@ body{
   line-height:1.6;
 }
 .page{max-width:980px;margin:0 auto;padding:32px 20px 64px;}
-header{text-align:center;margin-bottom:8px;}
+header{text-align:center;margin-bottom:8px;position:relative;}
+.settings-toggle{
+  position:absolute;top:0;right:0;background:transparent;color:var(--ink-soft);
+  border:1px solid var(--line);border-radius:4px;font-size:18px;line-height:1;
+  padding:6px 10px;
+}
+.settings-toggle:hover{background:rgba(0,0,0,0.04);}
+.settings-panel{
+  background:rgba(255,255,255,0.4);border:1px solid var(--line);border-radius:6px;
+  padding:16px 20px;margin-bottom:20px;box-shadow:0 2px 10px var(--shadow);
+}
+.settings-panel h2{font-family:'Cinzel',serif;font-size:17px;margin:0 0 12px;color:var(--ink);}
+.settings-panel label{font-family:'Cinzel',serif;font-size:13px;color:var(--ink-soft);display:block;margin:10px 0 4px;}
+.settings-panel input[type="text"]{
+  width:100%;font-family:'EB Garamond',serif;font-size:16px;color:var(--ink);
+  background:var(--parchment);border:1px solid var(--line);border-radius:4px;
+  padding:8px 10px;
+}
+.settings-actions{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;}
+.settings-actions button{background:transparent;color:var(--ink);border:1px solid var(--line);}
+.settings-actions button:hover{background:rgba(0,0,0,0.04);}
+.settings-status{font-size:14px;margin-top:10px;min-height:18px;}
 .eyebrow{
   font-family:'Cinzel', serif;font-size:13px;letter-spacing:2px;
   text-transform:uppercase;color:var(--magic);margin-bottom:6px;

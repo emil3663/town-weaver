@@ -223,15 +223,124 @@ const DEFAULT_DATA = {
   quote: "Every story is a door, but not every door should be opened."
 };
 
-// --- AI generation ---
+// --- settings: Ollama URL + model, persisted to localStorage ---
+const SETTINGS_KEY = 'townWeaverSettings';
+const DEFAULT_SETTINGS = { ollamaUrl: 'http://localhost:11434', model: 'mistral' };
+
+function loadSettings(){
+  try{
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if(!raw) return {...DEFAULT_SETTINGS};
+    const parsed = JSON.parse(raw);
+    return {
+      ollamaUrl: parsed.ollamaUrl || DEFAULT_SETTINGS.ollamaUrl,
+      model: parsed.model || DEFAULT_SETTINGS.model,
+    };
+  }catch(err){
+    return {...DEFAULT_SETTINGS};
+  }
+}
+
+function saveSettings(settings){
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
+
+let currentSettings = loadSettings();
+
+const settingsBtn = document.getElementById('settingsBtn');
+const settingsPanel = document.getElementById('settingsPanel');
+const ollamaUrlInput = document.getElementById('ollamaUrlInput');
+const modelInput = document.getElementById('modelInput');
+const testConnectionBtn = document.getElementById('testConnectionBtn');
+const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+const settingsStatus = document.getElementById('settingsStatus');
+
+function setSettingsStatus(msg, isError){
+  settingsStatus.textContent = msg;
+  settingsStatus.style.color = isError ? 'var(--coral)' : 'var(--forest)';
+}
+
+settingsBtn.addEventListener('click', ()=>{
+  if(settingsPanel.hidden){
+    ollamaUrlInput.value = currentSettings.ollamaUrl;
+    modelInput.value = currentSettings.model;
+    settingsStatus.textContent = '';
+    settingsPanel.hidden = false;
+  }else{
+    settingsPanel.hidden = true;
+  }
+});
+
+testConnectionBtn.addEventListener('click', async ()=>{
+  const url = ollamaUrlInput.value.trim().replace(/\/$/, '') || DEFAULT_SETTINGS.ollamaUrl;
+  setSettingsStatus('Testing…', false);
+  try{
+    const res = await fetch(`${url}/api/tags`);
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const count = (data.models || []).length;
+    setSettingsStatus(`Connected — ${count} model${count === 1 ? '' : 's'} available.`, false);
+  }catch(err){
+    setSettingsStatus('Could not reach Ollama at that URL. Is it running?', true);
+  }
+});
+
+saveSettingsBtn.addEventListener('click', ()=>{
+  const url = ollamaUrlInput.value.trim().replace(/\/$/, '') || DEFAULT_SETTINGS.ollamaUrl;
+  const model = modelInput.value.trim() || DEFAULT_SETTINGS.model;
+  currentSettings = { ollamaUrl: url, model: model };
+  saveSettings(currentSettings);
+  setSettingsStatus('Settings saved.', false);
+});
+
+// --- tier-aware prompts, embedded client-side (Ollama has no server to hold
+// a secret system prompt, so these are plain strings shipped with the app) ---
+const TIER_SPECS = {
+  'town': {
+    label: 'Town', popMin: 500, popMax: 2000, locMin: 6, locMax: 10, resMin: 3, resMax: 4,
+    flavor: 'an intimate market town or regional hub, with a simple economy and informal governance (a single leader, council, or elder)',
+  },
+  'city': {
+    label: 'City', popMin: 3000, popMax: 8000, locMin: 10, locMax: 15, resMin: 6, resMax: 8,
+    flavor: 'a regional capital or major trade center, with a complex, layered economy and multiple named administrative or guild roles',
+  },
+  'county-seat': {
+    label: 'County Seat', popMin: 8000, popMax: 15000, locMin: 12, locMax: 18, resMin: 8, resMax: 12,
+    flavor: 'an administrative capital for a county, with an established history, visible military or civic infrastructure, and formal governance',
+  },
+  'provincial-capital': {
+    label: 'Provincial Capital', popMin: 15000, popMax: 40000, locMin: 15, locMax: 25, resMin: 12, resMax: 20,
+    flavor: "a kingdom or region's major city, with extensive infrastructure, multiple distinct districts, and a deep bureaucracy or noble hierarchy",
+  },
+};
+
+function buildTierPrompt(tier){
+  const spec = TIER_SPECS[tier];
+  return `You design fictional settlements for a tabletop RPG map app. This settlement is ${spec.flavor}.
+Output ONLY a valid JSON object, no markdown, no explanation, no backticks. Return exactly this shape:
+{"name":string,"subtitle":string,"overview":string (2-3 sentences, evoking a settlement of roughly ${spec.popMin}-${spec.popMax} inhabitants),
+"population":integer (a specific plausible population between ${spec.popMin} and ${spec.popMax}),
+"landmark":{"name":string,"description":string (1-2 sentences)},
+"riverName":string or null,"riverDesc":string or null (1 sentence),
+"forestDesc":string or null (1 sentence, describes whatever borders the settlement — forest, dunes, ice, etc.),
+"locations":[${spec.locMin} to ${spec.locMax} objects: {"name":string,"ring":"inner" or "outer","category": one of "dwelling","water","nature","defense","agriculture","burial","gate","dock","ritual","description":string (under 18 words)}],
+"residents":[${spec.resMin} to ${spec.resMax} objects: {"name":string,"role":string,"bio":string (under 15 words)}],
+"economy":string (1 sentence),"customs":[3 short strings],"hooks":[3 short strings],"dangers":string (1 sentence),"quote":string (a short inscription-style line)}
+Pick categories that genuinely match each location's function. Keep every string terse. Split locations roughly evenly between "inner" and "outer" rings. Output ONLY the JSON object — never add backticks, markdown fences, or any explanation before or after it.`;
+}
+
+const TIER_PROMPTS = {
+  'town': buildTierPrompt('town'),
+  'city': buildTierPrompt('city'),
+  'county-seat': buildTierPrompt('county-seat'),
+  'provincial-capital': buildTierPrompt('provincial-capital'),
+};
+
+// --- Ollama generation ---
 const generateBtn = document.getElementById('generateBtn');
 const resetBtn = document.getElementById('resetBtn');
 const promptInput = document.getElementById('promptInput');
 const genStatus = document.getElementById('genStatus');
-
-// Backend base URL. Updated to the deployed Render URL once TW-104 stands
-// up the live service; defaults to a local backend for development.
-const API_BASE_URL = "http://localhost:8000";
 
 function setStatus(msg, isError){
   genStatus.textContent = msg;
@@ -243,27 +352,65 @@ function getSelectedTier(){
   return checked ? checked.value : 'town';
 }
 
+// Ollama sometimes wraps its JSON in markdown fences or adds stray prose
+// around it; strip fences and isolate the outermost {...} before parsing.
+function parseOllamaJson(rawText){
+  let cleaned = (rawText || '').trim().replace(/```json/gi, '').replace(/```/g, '').trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if(start !== -1 && end !== -1 && end > start){
+    cleaned = cleaned.slice(start, end + 1);
+  }
+  return JSON.parse(cleaned);
+}
+
+function assignLocationIds(data){
+  (data.locations || []).forEach((loc, i)=>{
+    if(!loc.id) loc.id = `loc-${i}-${Date.now()}`;
+  });
+  return data;
+}
+
 async function generateTown(promptText){
-  setStatus('Drafting the town charter…', false);
+  const tier = getSelectedTier();
+  setStatus('Drafting the settlement charter…', false);
   generateBtn.disabled = true;
   try{
-    const response = await fetch(`${API_BASE_URL}/api/generate-settlement`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ concept: promptText, tier: getSelectedTier() })
-    });
-    if(!response.ok){
-      const errBody = await response.json().catch(()=>({}));
-      throw new Error(errBody.detail || `Request failed (${response.status})`);
+    const base = (currentSettings.ollamaUrl || DEFAULT_SETTINGS.ollamaUrl).replace(/\/$/, '');
+    const fullPrompt = `${TIER_PROMPTS[tier]}\n\nConcept: ${promptText}`;
+
+    let response;
+    try{
+      response = await fetch(`${base}/api/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: currentSettings.model, prompt: fullPrompt, stream: false })
+      });
+    }catch(networkErr){
+      throw new Error(`Could not reach Ollama at ${base}. Is it running? Check Settings (⚙).`);
     }
-    const data = await response.json();
+
+    if(!response.ok){
+      throw new Error(`Ollama returned an error (HTTP ${response.status}). Check the URL and model name in Settings.`);
+    }
+
+    const json = await response.json();
+    let data;
+    try{
+      data = parseOllamaJson(json.response);
+    }catch(parseErr){
+      throw new Error("Ollama's response wasn't valid JSON — try regenerating, or try a different model in Settings.");
+    }
+
+    data.tier = tier;
     if(!data.landmark) data.landmark = {name:"The landmark", description:""};
+    assignLocationIds(data);
     renderMap(data);
     renderDoc(data);
     setStatus('Done — click anything on the map to explore it.', false);
   }catch(err){
     console.error(err);
-    setStatus('Something went wrong generating that town — try rephrasing, or simplifying the concept.', true);
+    setStatus(err.message || 'Something went wrong generating that settlement — try rephrasing, or simplifying the concept.', true);
   }finally{
     generateBtn.disabled = false;
   }
