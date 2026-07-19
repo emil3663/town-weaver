@@ -238,14 +238,19 @@ function setStatus(msg, isError){
   genStatus.style.color = isError ? 'var(--coral)' : 'var(--ink-soft)';
 }
 
+function getSelectedTier(){
+  const checked = document.querySelector('input[name="tier"]:checked');
+  return checked ? checked.value : 'town';
+}
+
 async function generateTown(promptText){
   setStatus('Drafting the town charter…', false);
   generateBtn.disabled = true;
   try{
-    const response = await fetch(`${API_BASE_URL}/api/generate-town`, {
+    const response = await fetch(`${API_BASE_URL}/api/generate-settlement`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ concept: promptText })
+      body: JSON.stringify({ concept: promptText, tier: getSelectedTier() })
     });
     if(!response.ok){
       const errBody = await response.json().catch(()=>({}));

@@ -20,10 +20,35 @@
   <div class="divider"></div>
 
   <div class="generator">
-    <label for="promptInput">Describe a town concept, and Claude will design and draw a new one</label>
+    <label for="promptInput">Describe a settlement concept, and Claude will design and draw a new one</label>
     <textarea id="promptInput" rows="2" placeholder="e.g. a coastal smugglers' town built into sea caves, run by a council of retired pirates"></textarea>
+
+    <fieldset class="tier-select" id="tierSelect">
+      <legend>Settlement size</legend>
+      <label class="tier-option">
+        <input type="radio" name="tier" value="town" checked>
+        <span class="tier-option-label">Town</span>
+        <span class="tier-option-desc">~500–2,000 inhabitants — a market town or regional hub</span>
+      </label>
+      <label class="tier-option">
+        <input type="radio" name="tier" value="city">
+        <span class="tier-option-label">City</span>
+        <span class="tier-option-desc">~3,000–8,000 inhabitants — a regional capital or trade center</span>
+      </label>
+      <label class="tier-option">
+        <input type="radio" name="tier" value="county-seat">
+        <span class="tier-option-label">County Seat</span>
+        <span class="tier-option-desc">~8,000–15,000 inhabitants — an administrative capital</span>
+      </label>
+      <label class="tier-option">
+        <input type="radio" name="tier" value="provincial-capital">
+        <span class="tier-option-label">Provincial Capital</span>
+        <span class="tier-option-desc">~15,000–40,000 inhabitants — a kingdom's major city</span>
+      </label>
+    </fieldset>
+
     <div class="gen-actions">
-      <button id="generateBtn" type="button">Generate town</button>
+      <button id="generateBtn" type="button">Generate settlement</button>
       <button id="resetBtn" type="button">Reset to Thornwick</button>
     </div>
     <div class="gen-status" id="genStatus"></div>
