@@ -57,52 +57,76 @@ Prefix: `TW-`
 
 ## Phase 1 — Backend proxy and core generation flow
 
-### TW-101 - Build FastAPI backend with /api/generate-town
+### TW-101 - Build FastAPI backend with /api/generate-settlement (tier-aware)
 
 - **Phase:** 1
 - **Priority:** P0
 - **Suggested labels:** `backend`, `feature`
-- **Problem it solves:** This is the core structural fix versus the prototype — the client can no longer hold the Anthropic API key, so the backend needs to exist and do the actual Claude call.
+- **Problem it solves:** This is the core structural fix versus the prototype — the client can no longer hold the Anthropic API key, so the backend needs to exist and do the actual Claude call. Additionally, settlement generation must be tier-aware: towns, cities, county seats, and provincial capitals have fundamentally different scales and structures.
 - **Scope:**
-  - Move the system prompt and schema (from the prototype) server-side.
-  - Implement `POST /api/generate-town`, accepting `{ concept: string }`.
+  - Create four tier-specific system prompts (server-side): one for towns (~500–2,000 pop, 6–10 locations), one for cities (~3,000–8,000 pop, 10–15 locations), one for county seats (~8,000–15,000 pop, 12–18 locations), one for provincial capitals (~15,000–40,000 pop, 15–25 locations).
+  - Implement `POST /api/generate-settlement`, accepting `{ concept: string, tier: "town" | "city" | "county-seat" | "provincial-capital" }`.
+  - Route the request to the appropriate tier-specific prompt based on the tier parameter.
+  - Return a `Settlement` object with the tier, a population figure that scales to the tier, and locations/residents counts that match the tier.
   - Read the Anthropic API key from environment, never from client input.
 - **Deliverables:**
-  - Working FastAPI route that calls Claude and returns raw JSON.
+  - Working FastAPI route that calls Claude with a tier-aware system prompt and returns `Settlement`-shaped JSON.
 - **Acceptance criteria:**
-  - Calling the route with a concept string returns a `Town`-shaped JSON response.
+  - Calling the route with a concept and tier=town returns a settlement with ~500–2,000 population and 6–10 locations.
+  - Calling the route with the same concept and tier=provincial-capital returns a settlement with ~15,000–40,000 population and 15–25 locations.
   - The Anthropic API key does not appear anywhere in client-shipped code.
 - **Dependencies:** TW-001.
 
-### TW-102 - Server-side response validation
+### TW-102 - Server-side response validation (tier-aware)
 
 - **Phase:** 1
 - **Priority:** P0
 - **Suggested labels:** `backend`, `reliability`
-- **Problem it solves:** The prototype trusts `JSON.parse` blindly on Claude's output; a real backend needs to catch malformed responses before they reach the client.
+- **Problem it solves:** The prototype trusts `JSON.parse` blindly on Claude's output; a real backend needs to catch malformed responses before they reach the client. Additionally, tier-aware generation means validation must check that location and resident counts match the tier constraints.
 - **Scope:**
-  - Validate the parsed JSON against the `Town` schema (required fields present, `locations[].category` is one of the allowed values, etc.).
+  - Validate the parsed JSON against the `Settlement` schema (required fields present, `tier` is a valid tier, `locations[].category` is one of the allowed values, population is in the expected range for the tier, location count is within tier bounds).
   - Return a clear 5xx error with a message if validation fails, rather than forwarding malformed data.
 - **Deliverables:**
-  - A schema validation function used by `/api/generate-town` (and reused by `/api/regenerate-location` in Phase 3).
+  - A schema validation function used by `/api/generate-settlement` (and reused by `/api/regenerate-location` in Phase 3).
 - **Acceptance criteria:**
   - A deliberately malformed mock Claude response is rejected with a clear error, not forwarded to the client.
+  - A response with the right schema but invalid tier (e.g., tier="unknown") is rejected.
+  - A town-tier response with 25 locations (when town tier expects 6–10) is flagged and rejected.
 - **Dependencies:** TW-101.
 
-### TW-103 - Migrate client to call the backend instead of Anthropic directly
+### TW-103 - Add settlement tier selector to the client UI
 
 - **Phase:** 1
 - **Priority:** P0
 - **Suggested labels:** `client`, `feature`
-- **Problem it solves:** The whole point of Phase 1 — the client stops holding/calling with an API key at all.
+- **Problem it solves:** Users need to specify what kind of settlement they're generating (town, city, county seat, or provincial capital) so the backend can scale the response appropriately. Without tier selection, generation defaults to one size.
 - **Scope:**
-  - Replace the prototype's direct `fetch("https://api.anthropic.com/...")` call with a call to the backend's `/api/generate-town`.
-  - Keep the existing `renderMap`/`renderDoc` pipeline unchanged — only the data source changes.
+  - Add a dropdown/radio selector to the generator UI before the "Generate settlement" button, with four options: Town, City, County Seat, Provincial Capital.
+  - Include a brief description under each option (e.g., "Town (~500–2,000 inhabitants, market town or regional hub)").
+  - Default to "Town" for first-time users.
 - **Deliverables:**
-  - Updated `client/app.js` pointing at the backend.
+  - Updated `client/index.html` and `client/app.js` with tier selector.
 - **Acceptance criteria:**
-  - Generating a town in the browser produces identical rendered output to the prototype, with network calls going to the backend, not Anthropic.
-- **Dependencies:** TW-101.
+  - A user can select a tier before generating.
+  - The selected tier is visible and changeable before hitting Generate.
+- **Dependencies:** TW-001.
+
+### TW-103b - Migrate client to call the backend's /api/generate-settlement
+
+- **Phase:** 1
+- **Priority:** P0
+- **Suggested labels:** `client`, `feature`
+- **Problem it solves:** The whole point of Phase 1 — the client stops holding/calling with an API key at all. The client must now send both the concept and the selected tier to the backend.
+- **Scope:**
+  - Replace the prototype's direct `fetch("https://api.anthropic.com/...")` call with a call to the backend's `/api/generate-settlement`.
+  - Capture the selected tier from TW-103's selector and include it in the request: `{ concept, tier }`.
+  - Keep the existing `renderMap`/`renderDoc` pipeline unchanged — only the data source and request shape change.
+- **Deliverables:**
+  - Updated `client/app.js` pointing at the backend's `/api/generate-settlement` with tier parameter.
+- **Acceptance criteria:**
+  - Selecting tier=town and generating produces a settlement with 6–10 locations and ~500–2,000 population.
+  - Selecting tier=provincial-capital and generating produces a settlement with 15–25 locations and ~15,000–40,000 population.
+- **Dependencies:** TW-101, TW-103.
 
 ### TW-104 - Deploy and connect end to end
 
@@ -113,11 +137,14 @@ Prefix: `TW-`
 - **Scope:**
   - Deploy the finished backend to the Render service from TW-003.
   - Point the deployed client at the live backend URL.
+  - Configure GitHub Pages to serve the client.
 - **Deliverables:**
-  - A publicly reachable version of the app that generates towns end to end.
+  - A publicly reachable version of the app that generates settlements end to end, with tier selection working.
 - **Acceptance criteria:**
-  - Visiting the deployed client URL and generating a town works without any local setup.
-- **Dependencies:** TW-101, TW-102, TW-103, TW-003.
+  - Visiting the deployed client URL, selecting tier=town, and generating a settlement works without any local setup.
+  - Selecting tier=provincial-capital and generating produces a visibly larger settlement (more locations, more residents).
+  - Tier selection persists across browser refreshes (stored in localStorage via TW-201 when it ships).
+- **Dependencies:** TW-101, TW-102, TW-103b, TW-003.
 
 ## Phase 2 — Persistence and rate limiting
 
@@ -223,19 +250,21 @@ Prefix: `TW-`
 3. TW-003
 4. TW-101
 5. TW-102
-6. TW-103
-7. TW-104
-8. TW-201
-9. TW-202
-10. TW-203
-11. TW-301
-12. TW-302
-13. TW-303
+6. TW-103 (add tier selector UI)
+7. TW-103b (connect client to backend with tier parameter)
+8. TW-104
+9. TW-201
+10. TW-202
+11. TW-203
+12. TW-301
+13. TW-302
+14. TW-303
 
 ## Suggested Milestone Gates
 
-### Gate A - Backend live (end of Phase 1)
-- Generating a town in the deployed client works end to end via the Render-hosted backend.
+### Gate A - Backend live with tier-aware generation (end of Phase 1)
+- Generating a settlement in the deployed client works end to end via the Render-hosted backend.
+- Tier selection is visible and functional; selecting different tiers produces visibly different settlements (varying location counts, population, and scope).
 - No client code contains or calls the Anthropic API key directly.
 
 ### Gate B - Persistence and safety (end of Phase 2)

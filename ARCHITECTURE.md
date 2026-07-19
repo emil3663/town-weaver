@@ -72,16 +72,18 @@ The prototype has two components (browser, Anthropic API). The real app needs th
 ## 5. Data model
 
 ```ts
-type Town = {
+type Settlement = {
+  tier: "town" | "city" | "county-seat" | "provincial-capital";  // new, drives scale and structure
   name: string;
   subtitle: string;
+  population: number;          // tier-determined, shown to user for context
   overview: string;
   landmark: { name: string; description: string };
   riverName: string | null;
   riverDesc: string | null;
   forestDesc: string | null;
-  locations: Location[];       // 6–10, category-tagged
-  residents: Resident[];       // 3–4
+  locations: Location[];       // 6–10 for towns/cities; more for larger settlements
+  residents: Resident[];       // 3–4 for towns; 6–8 for cities; scales with tier
   economy: string;
   customs: string[];           // 3 items
   hooks: string[];             // 3 items
@@ -90,7 +92,7 @@ type Town = {
 };
 
 type Location = {
-  id: string;                  // stable id, added in v1 so a single location can be targeted for regeneration
+  id: string;                  // stable id, needed for single-location regeneration
   name: string;
   ring: "inner" | "outer";
   category: "dwelling" | "water" | "nature" | "defense" | "agriculture" | "burial" | "gate" | "dock" | "ritual";
@@ -100,22 +102,30 @@ type Location = {
 type Resident = { name: string; role: string; bio: string };
 ```
 
-Note: `Location.id` is new versus the prototype — needed so `/api/regenerate-location` can identify which one to replace without relying on array position.
+**Settlement tiers and their characteristics:**
+- **Town** (~500–2,000 pop): A market town or regional hub. 6–10 locations, 3–4 residents, intimate economy and governance.
+- **City** (~3,000–8,000 pop): A regional capital or major trade center. 10–15 locations, 6–8 residents, complex economy, multiple administrative roles.
+- **County Seat** (~8,000–15,000 pop): An administrative capital for a county. 12–18 locations, 8–12 residents, established history, military/civic infrastructure.
+- **Provincial Capital** (~15,000–40,000 pop): A kingdom or region's major city. 15–25 locations, 12–20 residents, extensive infrastructure, multiple districts.
+
+Note: `Settlement` renamed from `Town` to reflect that it can now represent multiple settlement types. The hex-and-road map scales to accommodate tier (more locations, more complex layout suggestions).
 
 ## 6. API design
 
-`POST /api/generate-town`
-- Request: `{ "concept": string }`
-- Response (200): a `Town` object
+`POST /api/generate-settlement`
+- Request: `{ "concept": string, "tier": "town" | "city" | "county-seat" | "provincial-capital" }`
+- Response (200): a `Settlement` object with the requested tier, population scaled appropriately, and locations/residents matched to tier
 - Response (429): `{ "error": "Daily generation limit reached" }` — rate limit hit
 - Response (4xx/5xx): `{ "error": string }`
 
 `POST /api/regenerate-location`
-- Request: `{ "town": Town, "locationId": string }`
-- Response (200): a single updated `Location` object, same `id`, to be merged into the client's current town state
+- Request: `{ "settlement": Settlement, "locationId": string }`
+- Response (200): a single updated `Location` object, same `id`, to be merged into the client's current settlement state
 - Response (429/4xx/5xx): same error shape as above
 
-The backend owns the system prompts for both routes (server-side, not shipped in client JS), so they can be tuned without a client redeploy.
+The backend owns the system prompts for both routes (server-side, not shipped in client JS). Prompts are tier-aware — the prompt for a provincial capital is fundamentally different from the prompt for a town, in scope, economy, and governance detail.
+
+Route renamed from `/api/generate-town` → `/api/generate-settlement` to reflect the broader scope.
 
 ## 7. Repository structure
 
@@ -150,13 +160,19 @@ town-weaver/
 - Rate limiting: Firestore-backed counter, checked server-side before every Claude call, on both endpoints.
 - Firestore security rules: per-user, owner-only read/write for the future sync collection — written and tested in this phase even though not yet reachable by end users.
 
-## 9. Repository settings
+## 9. Deployment topology
+
+- **Client:** GitHub Pages, served directly from `client/` in this repo. Zero additional cost or infrastructure, and the client is a static vanilla JS app with no build step, so nothing else is needed.
+- **Backend:** Render.com, as established in Section 4.2.
+- **CORS:** the backend must explicitly allow the GitHub Pages origin (`https://emil3663.github.io`) in its CORS configuration — not a wildcard. This was missed in the original TW-103/TW-104 scope and needs adding to the FastAPI app before Gate A is actually reachable from the deployed client, not just from `localhost`.
+
+## 10. Repository settings
 
 - **Name:** `town-weaver` (placeholder — can be renamed later without affecting anything in this document)
 - **Visibility:** Public
 - **License:** MIT
 
-## 10. Deferred to later phases
+## 11. Deferred to later phases
 
 - Sign-in and cross-device sync UI (Firestore plumbing is ready; this activates it).
 - Zoom and pan on the map.
